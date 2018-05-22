@@ -26,6 +26,13 @@ type InstallReleaseRequest struct {
 	Namespace string `json:"namespace" description:"namespace"`
 }
 
+type DeleteReleaseRequest struct {
+	DryRun       bool  `json:"dryRun" description:"simulate a delete"`
+	DisableHooks bool  `json:"disableHooks" description:"prevent hooks from running during deletion"`
+	Purge        bool  `json:"purge" description:"remove the release from the store and make its name free for later user"`
+	Timeout      int64 `json:"timeout" description:"time in seconds to wait for any individual Kubernetes operations"`
+}
+
 var (
 	tillerAddr  string
 	serviceAddr string
@@ -67,6 +74,28 @@ func (r *ReleaseResource) List(request *restful.Request, response *restful.Respo
 	if err == nil {
 		response.WriteEntity(resp)
 	} else {
+		response.WriteError(http.StatusInternalServerError, err)
+	}
+}
+
+func (r *ReleaseResource) Delete(request *restful.Request, response *restful.Response) {
+	req := new(DeleteReleaseRequest)
+	err := request.ReadEntity(&req)
+	if err == nil {
+		releaseName := request.PathParameter("release-name")
+		deleteOptions := []helm.DeleteOption{
+			helm.DeleteDryRun(req.DryRun),
+			helm.DeleteDisableHooks(req.DisableHooks),
+			helm.DeletePurge(req.Purge),
+			helm.DeleteTimeout(req.Timeout),
+		}
+		resp, err := r.client.DeleteRelease(releaseName, deleteOptions...)
+		if err != nil {
+			response.WriteError(http.StatusInternalServerError, err)
+		} else {
+			response.WriteEntity(resp)
+		}
+	} else {
 		response.WriteError(http.StatusBadRequest, err)
 	}
 }
@@ -86,6 +115,11 @@ func (r *ReleaseResource) WebService() *restful.WebService {
 	ws.
 		Route(ws.GET("/").To(r.List).
 			Doc("List releases"))
+
+	ws.
+		Route(ws.DELETE("/{release-name}").To(r.Delete).
+			Doc("Delete a releases").
+			Param(ws.PathParameter("releases-name", "release name").DataType("string")))
 
 	return ws
 }
