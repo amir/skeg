@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/emicklei/go-restful"
 	"github.com/spf13/pflag"
@@ -12,6 +14,8 @@ import (
 	"k8s.io/helm/pkg/getter"
 	"k8s.io/helm/pkg/helm"
 	helm_env "k8s.io/helm/pkg/helm/environment"
+	"k8s.io/helm/pkg/proto/hapi/release"
+	"k8s.io/helm/pkg/proto/hapi/services"
 )
 
 type ReleaseResource struct {
@@ -69,8 +73,97 @@ func (r *ReleaseResource) Install(request *restful.Request, response *restful.Re
 	}
 }
 
+func contains(arr []string, str string) bool {
+	for _, a := range arr {
+		if a == str {
+			return true
+		}
+	}
+
+	return false
+}
+
+func releaseStatusCodes(code string) []release.Status_Code {
+	if code == "all" {
+		return []release.Status_Code{
+			release.Status_UNKNOWN,
+			release.Status_DEPLOYED,
+			release.Status_DELETED,
+			release.Status_DELETING,
+			release.Status_FAILED,
+			release.Status_PENDING_INSTALL,
+			release.Status_PENDING_UPGRADE,
+			release.Status_PENDING_ROLLBACK,
+		}
+	}
+
+	statusCodes := []release.Status_Code{}
+	codes := strings.Split(code, ",")
+
+	if contains(codes, "deployed") {
+		statusCodes = append(statusCodes, release.Status_DEPLOYED)
+	}
+
+	if contains(codes, "deleted") {
+		statusCodes = append(statusCodes, release.Status_DELETED)
+	}
+
+	if contains(codes, "deleting") {
+		statusCodes = append(statusCodes, release.Status_DELETING)
+	}
+
+	if contains(codes, "failed") {
+		statusCodes = append(statusCodes, release.Status_FAILED)
+	}
+
+	if contains(codes, "superseded") {
+		statusCodes = append(statusCodes, release.Status_SUPERSEDED)
+	}
+
+	if contains(codes, "pending") {
+		statusCodes = append(statusCodes, release.Status_PENDING_INSTALL, release.Status_PENDING_UPGRADE, release.Status_PENDING_ROLLBACK)
+	}
+
+	return statusCodes
+}
+
+func listOptions(request *restful.Request) []helm.ReleaseListOption {
+	sortBy := services.ListSort_NAME
+	if request.QueryParameter("sort_by") == "last_released" {
+		sortBy = services.ListSort_LAST_RELEASED
+	}
+
+	sortOrder := services.ListSort_ASC
+	if request.QueryParameter("sort_ord") == "desc" {
+		sortOrder = services.ListSort_DESC
+	}
+
+	limit := 256
+	if l, err := strconv.Atoi(request.QueryParameter("limit")); err == nil {
+		limit = l
+	}
+
+	statusCodes := []release.Status_Code{
+		release.Status_DEPLOYED,
+		release.Status_FAILED,
+	}
+
+	if request.QueryParameter("status") != "" {
+		statusCodes = releaseStatusCodes(request.QueryParameter("status"))
+	}
+
+	return []helm.ReleaseListOption{
+		helm.ReleaseListSort(int32(sortBy)),
+		helm.ReleaseListOrder(int32(sortOrder)),
+		helm.ReleaseListLimit(limit),
+		helm.ReleaseListOffset(request.QueryParameter("offset")),
+		helm.ReleaseListFilter(request.QueryParameter("filter")),
+		helm.ReleaseListStatuses(statusCodes),
+	}
+}
+
 func (r *ReleaseResource) List(request *restful.Request, response *restful.Response) {
-	resp, err := r.client.ListReleases()
+	resp, err := r.client.ListReleases(listOptions(request)...)
 	if err == nil {
 		response.WriteEntity(resp)
 	} else {
@@ -114,7 +207,13 @@ func (r *ReleaseResource) WebService() *restful.WebService {
 
 	ws.
 		Route(ws.GET("/").To(r.List).
-			Doc("List releases"))
+			Doc("List releases").
+			Param(ws.QueryParameter("sort_by", "sort by").DataType("string")).
+			Param(ws.QueryParameter("sort_ord", "sort order").DataType("string")).
+			Param(ws.QueryParameter("limit", "limit").DataType("int")).
+			Param(ws.QueryParameter("offset", "offset").DataType("int")).
+			Param(ws.QueryParameter("filter", "filter").DataType("string")).
+			Param(ws.QueryParameter("status", "status").DataType("string")))
 
 	ws.
 		Route(ws.DELETE("/{release-name}").To(r.Delete).
