@@ -112,6 +112,39 @@ func installPackage(serverUrl, namespace string) (string, error) {
 	return installReleaseResponse.Release.Name, nil
 }
 
+func updateRelease(serverUrl, namespace, releaseName string) error {
+	var payload = &UpdateReleaseRequest{
+		RepoName:  "stable",
+		ChartName: "wordpress",
+		Version:   "0.8.7",
+		Namespace: namespace,
+	}
+
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequest("POST", serverUrl+"/api/v1/releases/"+releaseName, bytes.NewBuffer(b))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", restful.MIME_JSON)
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("unexpected response: %v, expected: %v", resp.StatusCode, http.StatusOK)
+	}
+
+	return nil
+}
+
 func TestServer(t *testing.T) {
 	serverUrl := "http://localhost:8090"
 	go func() {
@@ -138,6 +171,11 @@ func TestServer(t *testing.T) {
 	}
 	if len(releases) != 1 {
 		t.Error(fmt.Errorf("unexpected number of releases: %d, expected: %d", len(releases), 1))
+	}
+
+	err = updateRelease(serverUrl, namespace, releaseName)
+	if err != nil {
+		t.Error(err)
 	}
 
 	err = deleteRelease(serverUrl, namespace, releaseName)

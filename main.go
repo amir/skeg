@@ -31,6 +31,13 @@ type InstallReleaseRequest struct {
 	Namespace string `json:"namespace" description:"namespace"`
 }
 
+type UpdateReleaseRequest struct {
+	RepoName  string `json:"repoName" description:"repository name"`
+	ChartName string `json:"chartName" description:"chart name"`
+	Version   string `json:"version" description:"chart version"`
+	Namespace string `json:"namespace" description:"namespace"`
+}
+
 type DeleteReleaseRequest struct {
 	DryRun       bool  `json:"dryRun" description:"simulate a delete"`
 	DisableHooks bool  `json:"disableHooks" description:"prevent hooks from running during deletion"`
@@ -42,6 +49,40 @@ var (
 	tillerAddr  string
 	serviceAddr string
 )
+
+func (r *ReleaseResource) Update(request *restful.Request, response *restful.Response) {
+	req := new(UpdateReleaseRequest)
+	err := request.ReadEntity(&req)
+	if err == nil {
+		releaseName := request.PathParameter("release-name")
+		updateOptions := []helm.UpdateOption{
+			helm.UpdateValueOverrides([]byte("")),
+		}
+
+		dl := downloader.ChartDownloader{
+			HelmHome: r.settings.Home,
+			Getters:  getter.All(r.settings),
+		}
+		filename, _, err := dl.DownloadTo(
+			fmt.Sprintf("%s/%s", req.RepoName, req.ChartName),
+			req.Version,
+			r.settings.Home.Archive(),
+		)
+		if err != nil {
+			response.WriteError(http.StatusInternalServerError, err)
+		} else {
+			resp, err := r.client.UpdateRelease(releaseName, filename, updateOptions...)
+			if err != nil {
+				response.WriteError(http.StatusInternalServerError, err)
+			} else {
+				response.WriteHeaderAndEntity(http.StatusOK, resp)
+			}
+		}
+
+	} else {
+		response.WriteError(http.StatusBadRequest, err)
+	}
+}
 
 func (r *ReleaseResource) Install(request *restful.Request, response *restful.Response) {
 	req := new(InstallReleaseRequest)
@@ -224,6 +265,11 @@ func (r *ReleaseResource) WebService() *restful.WebService {
 	ws.
 		Route(ws.DELETE("/{release-name}").To(r.Delete).
 			Doc("Delete a releases").
+			Param(ws.PathParameter("releases-name", "release name").DataType("string")))
+
+	ws.
+		Route(ws.POST("/{release-name}").To(r.Update).
+			Doc("Update a releases").
 			Param(ws.PathParameter("releases-name", "release name").DataType("string")))
 
 	return ws
