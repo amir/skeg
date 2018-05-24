@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strconv"
@@ -168,7 +169,11 @@ func (r *ReleaseResource) List(request *restful.Request, response *restful.Respo
 	if err == nil {
 		response.WriteEntity(resp)
 	} else {
-		response.WriteError(http.StatusInternalServerError, err)
+		if err != io.EOF {
+			response.WriteError(http.StatusInternalServerError, err)
+		} else {
+			response.WriteEntity(&services.ListReleasesResponse{})
+		}
 	}
 }
 
