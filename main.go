@@ -159,6 +159,7 @@ func listOptions(request *restful.Request) []helm.ReleaseListOption {
 		helm.ReleaseListOffset(request.QueryParameter("offset")),
 		helm.ReleaseListFilter(request.QueryParameter("filter")),
 		helm.ReleaseListStatuses(statusCodes),
+		helm.ReleaseListNamespace(request.QueryParameter("namespace")),
 	}
 }
 
